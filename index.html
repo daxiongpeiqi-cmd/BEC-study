@@ -614,17 +614,8 @@ const AUDIO_FILES = [
   "audio/part3.chapter5.mp3","audio/part3.chapter6.mp3","audio/part3.chapter7.mp3","audio/part3.chapter8.mp3"
 ];
 async function loadTempAudioUrls(){
-  if (!cbApp || !cbApp.cloud) return;
-  try {
-    const res = await cbApp.cloud.getTempFileURL({ fileList: AUDIO_FILES });
-    (res.fileList || []).forEach(f => {
-      if (f.fileID && f.tempFileURL){
-        // fileID like "audio/part1.chapter1.mp3" or cloud://env/audio/...
-        const m = f.fileID.match(/(part\d+\.chapter\d+)\.mp3$/);
-        if (m) TEMP_URLS[m[1]] = f.tempFileURL;
-      }
-    });
-  } catch(e){ console.warn("getTempFileURL failed, fallback to relative audio/", e); }
+  // 音频改回相对路径，由 GitHub Pages 直接提供，不再调用 SDK 取临时链接
+  return;
 }
 function setSyncStatus(mode){
   const el = document.getElementById("syncDot");
@@ -1435,8 +1426,30 @@ function renderDay(){
 
   // audio
   const audioId = t.chapter.id;
-  const audioUrl = (typeof TEMP_URLS !== "undefined" && TEMP_URLS[audioId]) ? TEMP_URLS[audioId] : ("audio/"+audioId+".mp3");
-  html += '<div class="sec-title">'+SVG.headphones+' 今日音频 <span class="sec-sub">'+(TEMP_URLS[audioId]?'☁️ 云音频':'audio/'+audioId+'.mp3')+'</span></div>';
+  const AUDIO_CDN = {
+    "part1.chapter1":"https://aka.doubaocdn.com/s/ClCKNFevxD",
+    "part1.chapter2":"https://aka.doubaocdn.com/s/7UKovbF0B7",
+    "part1.chapter3":"https://aka.doubaocdn.com/s/uXDriZ0QzP",
+    "part1.chapter4":"https://aka.doubaocdn.com/s/oERAFUQYU7",
+    "part1.chapter5":"https://aka.doubaocdn.com/s/2XTCNkeJpV",
+    "part1.chapter6":"https://aka.doubaocdn.com/s/A4wPRGya0V",
+    "part1.chapter7":"https://aka.doubaocdn.com/s/GoYRSUQbbb",
+    "part2.chapter1":"https://aka.doubaocdn.com/s/FkVRFM5G8S",
+    "part2.chapter2":"https://aka.doubaocdn.com/s/utBGgl9gR2",
+    "part2.chapter3":"https://aka.doubaocdn.com/s/Z6gB2vwds4",
+    "part2.chapter4":"https://aka.doubaocdn.com/s/UyD0B57gwU",
+    "part2.chapter5":"https://aka.doubaocdn.com/s/qLd7M8EJKN",
+    "part3.chapter1":"https://aka.doubaocdn.com/s/aj1A3rU7B0",
+    "part3.chapter2":"https://aka.doubaocdn.com/s/PLe9woJDRP",
+    "part3.chapter3":"https://aka.doubaocdn.com/s/5anUDo053s",
+    "part3.chapter4":"https://aka.doubaocdn.com/s/56Bhi2i2I6",
+    "part3.chapter5":"https://aka.doubaocdn.com/s/1eESQ766l0",
+    "part3.chapter6":"https://aka.doubaocdn.com/s/SwrZBVtJrE",
+    "part3.chapter7":"https://aka.doubaocdn.com/s/4ahjPjyaIn",
+    "part3.chapter8":"https://aka.doubaocdn.com/s/vmB6jJHPLm"
+  };
+  const audioUrl = AUDIO_CDN[audioId] || ("audio/"+audioId+".mp3");
+  html += '<div class="sec-title">'+SVG.headphones+' 今日音频 <span class="sec-sub">'+audioId+'.mp3</span></div>';
   html += '<div class="audio-wrap"><audio controls preload="none" src="'+audioUrl+'"></audio></div>';
 
   // listening mini question
