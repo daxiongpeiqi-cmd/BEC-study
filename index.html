@@ -296,7 +296,7 @@ div[style*="fef9c3"] { border-radius:var(--c-radius) !important; backdrop-filter
   </div>
 
   <div style="background:#fef9c3; border:1px solid #fde047; color:#854d0e; padding:.7rem 1rem; border-radius:20px; margin-bottom:1rem; font-size:.82rem; word-break:break-word; overflow-wrap:break-word;">
-    ℹ️ 音频已托管在腾讯云CDN，单HTML即可直接播放，无需额外上传audio文件夹；首次播放需联网加载。
+    ℹ️ 当前为单HTML预览版：音频文件与HTML在同一目录(audio/)下，单独打开HTML时本地音频按钮暂不可播放；部署到GitHub Pages时把audio文件夹和HTML一起上传即可正常播放。
   </div>
 
   <div class="tab-bar" id="tabBar"></div>
@@ -604,6 +604,28 @@ const CONFIG = {
 const NICK_KEY = "bec90_nickname";
 let cbApp = null, cbToken = null, cbNick = null, cbReady = false;
 let cbSyncTimer = null;
+// Cloud storage temp URLs: { chapterId: tempUrl }
+const TEMP_URLS = {};
+const AUDIO_FILES = [
+  "audio/part1.chapter1.mp3","audio/part1.chapter2.mp3","audio/part1.chapter3.mp3",
+  "audio/part1.chapter4.mp3","audio/part1.chapter5.mp3","audio/part1.chapter6.mp3","audio/part1.chapter7.mp3",
+  "audio/part2.chapter1.mp3","audio/part2.chapter2.mp3","audio/part2.chapter3.mp3","audio/part2.chapter4.mp3","audio/part2.chapter5.mp3",
+  "audio/part3.chapter1.mp3","audio/part3.chapter2.mp3","audio/part3.chapter3.mp3","audio/part3.chapter4.mp3",
+  "audio/part3.chapter5.mp3","audio/part3.chapter6.mp3","audio/part3.chapter7.mp3","audio/part3.chapter8.mp3"
+];
+async function loadTempAudioUrls(){
+  if (!cbApp || !cbApp.cloud) return;
+  try {
+    const res = await cbApp.cloud.getTempFileURL({ fileList: AUDIO_FILES });
+    (res.fileList || []).forEach(f => {
+      if (f.fileID && f.tempFileURL){
+        // fileID like "audio/part1.chapter1.mp3" or cloud://env/audio/...
+        const m = f.fileID.match(/(part\d+\.chapter\d+)\.mp3$/);
+        if (m) TEMP_URLS[m[1]] = f.tempFileURL;
+      }
+    });
+  } catch(e){ console.warn("getTempFileURL failed, fallback to relative audio/", e); }
+}
 function setSyncStatus(mode){
   const el = document.getElementById("syncDot");
   if (!el) return;
@@ -668,6 +690,8 @@ async function initCloud(){
       try { cbToken = (await auth.getLoginState()).access_token; } catch(e2){}
     }
     if (!cbToken) throw new Error("no access token");
+    // pre-fetch temp audio URLs (non-blocking, offline-safe)
+    loadTempAudioUrls();
     // GET progress
     const url = CONFIG.REST_BASE + CONFIG.TABLE + "?user_id=eq." + encodeURIComponent(cbNick) + "&select=progress_data";
     const r = await fetch(url, { headers: authHeaders() });
@@ -1410,8 +1434,10 @@ function renderDay(){
   html += "</div>";
 
   // audio
-  html += '<div class="sec-title">'+SVG.headphones+' 今日音频 <span class="sec-sub">audio/'+esc(t.chapter.id)+'.mp3</span></div>';
-  html += '<div class="audio-wrap"><audio controls preload="none" src="https://becstudy-d3gee4lro8918b933.tcloudbaseapp.com/audio/'+esc(t.chapter.id)+'.mp3"></audio></div>';
+  const audioId = t.chapter.id;
+  const audioUrl = (typeof TEMP_URLS !== "undefined" && TEMP_URLS[audioId]) ? TEMP_URLS[audioId] : ("audio/"+audioId+".mp3");
+  html += '<div class="sec-title">'+SVG.headphones+' 今日音频 <span class="sec-sub">'+(TEMP_URLS[audioId]?'☁️ 云音频':'audio/'+audioId+'.mp3')+'</span></div>';
+  html += '<div class="audio-wrap"><audio controls preload="none" src="'+audioUrl+'"></audio></div>';
 
   // listening mini question
   html += renderListeningQ(t.chapter);
@@ -1942,4 +1968,3 @@ document.getElementById("footer").textContent = "90天核心冲刺 ｜ 20章 ｜
 </script>
 </body>
 </html>
-<!-- （注：内容由AI生成） -->
