@@ -614,8 +614,17 @@ const AUDIO_FILES = [
   "audio/part3.chapter5.mp3","audio/part3.chapter6.mp3","audio/part3.chapter7.mp3","audio/part3.chapter8.mp3"
 ];
 async function loadTempAudioUrls(){
-  // 音频改回相对路径，由 GitHub Pages 直接提供，不再调用 SDK 取临时链接
-  return;
+  if (!cbApp || !cbApp.cloud) return;
+  try {
+    const res = await cbApp.cloud.getTempFileURL({ fileList: AUDIO_FILES });
+    (res.fileList || []).forEach(f => {
+      if (f.fileID && f.tempFileURL){
+        // fileID like "audio/part1.chapter1.mp3" or cloud://env/audio/...
+        const m = f.fileID.match(/(part\d+\.chapter\d+)\.mp3$/);
+        if (m) TEMP_URLS[m[1]] = f.tempFileURL;
+      }
+    });
+  } catch(e){ console.warn("getTempFileURL failed, fallback to relative audio/", e); }
 }
 function setSyncStatus(mode){
   const el = document.getElementById("syncDot");
@@ -1159,29 +1168,129 @@ function bindQuiz(plan){
 }
 
 /* Listening mini-questions per chapter */
+function fakeSpelling(w){
+  // generate a near-miss spelling by swapping/altering one letter
+  const s = w.en;
+  if (s.length < 4) return s + "s";
+  const i = 1 + Math.floor(Math.random()*(s.length-2));
+  const replace = "aeiou";
+  const r = replace[Math.floor(Math.random()*replace.length)];
+  return s.substring(0,i) + r + s.substring(i+1);
+}
 function renderListeningQ(chapter){
-  // 1-2 questions derived from chapter scene/title
-  const titleParts = chapter.title.split("|");
-  const enTopic = titleParts[0].trim();
-  const cnTopic = (titleParts[1]||"").trim();
-  const otherChapters = [];
-  DATA.forEach(p => p.chapters.forEach(c => { if (c.id !== chapter.id) otherChapters.push(c.title.split("|")[0].trim()); }));
-  const opts = shuffle([enTopic, ...shuffle(otherChapters).slice(0,3)]);
-  let html = '<div class="sec-title">'+SVG.headphones+' 听力小题 <span class="sec-sub">听完音频后作答</span></div>';
-  html += '<div class="quiz-block">';
-  html += '<div class="quiz-q"><span class="q-type t1">听力理解</span>';
-  html += '<div class="q-text">1. 这段音频主要讨论的主题是？</div>';
-  html += '<div class="quiz-opts" data-listen="1">';
-  opts.forEach((o, oi) => {
-    const letter = String.fromCharCode(65+oi);
-    const isCorrect = (o === enTopic);
-    html += '<div class="quiz-opt" data-correct="'+isCorrect+'">'+letter+'. '+esc(o)+'</div>';
-  });
-  html += '</div></div>';
-  html += '<details style="margin-top:.5rem;"><summary>查看答案与原文要点</summary><div class="dialogue-body" style="margin-top:.4rem;"><b>正确答案：</b>'+esc(enTopic)+'（'+esc(cnTopic)+'）<br><b>场景：</b>'+esc(chapter.scene)+'</div></details>';
-  html += '</div>';
+  // Build 4-6 questions strictly from chapter.words / chapter.sentences
+  const words = (chapter.words||[]).filter(w => w.en && w.cn);
+  const sents = (chapter.sentences||[]).filter(s => s.en && s.cn);
+  let html = '';
+  let qNo = 0;
+
+  // Segment 1: spelling + meaning (from words)
+  const spWords = shuffle(words).slice(0, Math.min(2, words.length));
+  const mnWords = shuffle(words.filter(w => !spWords.find(x=>x.en===w.en))).slice(0, Math.min(2, words.length));
+  if (spWords.length || mnWords.length){
+    html += '<div class="sec-title">'+SVG.headphones+' ① 单词段题目 <span class="sec-sub">听完上方"单词朗读段"后作答</span></div>';
+    html += '<div class="quiz-block">';
+    spWords.forEach(w => {
+      qNo++;
+      const distractors = [];
+      while (distractors.length < 3){
+        const f = fakeSpelling(w);
+        if (f.toLowerCase() !== w.en.toLowerCase() && !distractors.includes(f)) distractors.push(f);
+      }
+      const opts = shuffle([w.en, ...distractors]);
+      html += '<div class="quiz-q"><span class="q-type t1">听力拼写</span>';
+      html += '<div class="q-text">'+qNo+'. 你在音频里听到的这个单词是？</div>';
+      html += '<div class="quiz-opts" data-listen="1" data-answer="'+esc(w.en)+'">';
+      opts.forEach((o, oi) => {
+        const letter = String.fromCharCode(65+oi);
+        html += '<div class="quiz-opt" data-correct="'+(o===w.en)+'">'+letter+'. '+esc(o)+'</div>';
+      });
+      html += '</div>';
+      html += '<details style="margin-top:.4rem;"><summary>答案与原文</summary><div class="dialogue-body" style="margin-top:.3rem;"><b>正确：</b>'+esc(w.en)+' <span style="color:#94a3b8;">'+esc(w.pos||"")+'</span> — '+esc(w.cn)+'</div></details>';
+      html += '</div>';
+    });
+    mnWords.forEach(w => {
+      qNo++;
+      const others = shuffle(words.filter(x => x.en !== w.en)).slice(0,3);
+      const opts = shuffle([w.cn, ...others.map(x=>x.cn)]);
+      html += '<div class="quiz-q"><span class="q-type t2">听词选义</span>';
+      html += '<div class="q-text">'+qNo+'. 音频里听到的 "<b>'+esc(w.en)+'</b>" 是什么意思？</div>';
+      html += '<div class="quiz-opts" data-listen="1" data-answer="'+esc(w.cn)+'">';
+      opts.forEach((o, oi) => {
+        const letter = String.fromCharCode(65+oi);
+        html += '<div class="quiz-opt" data-correct="'+(o===w.cn)+'">'+letter+'. '+esc(o)+'</div>';
+      });
+      html += '</div>';
+      html += '<details style="margin-top:.4rem;"><summary>答案与原文</summary><div class="dialogue-body" style="margin-top:.3rem;"><b>正确：</b>'+esc(w.en)+' — '+esc(w.cn)+'</div></details>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Segment 2: sentence translation
+  const snSents = shuffle(sents).slice(0, Math.min(2, sents.length));
+  if (snSents.length){
+    html += '<div class="sec-title" style="margin-top:.8rem;">'+SVG.headphones+' ② 例句段题目 <span class="sec-sub">听完上方"例句朗读段"后作答</span></div>';
+    html += '<div class="quiz-block">';
+    snSents.forEach(s => {
+      qNo++;
+      const others = shuffle(sents.filter(x => x.en !== s.en)).slice(0,3);
+      const opts = shuffle([s.cn, ...others.map(x=>x.cn)]);
+      html += '<div class="quiz-q"><span class="q-type t3">听句选译</span>';
+      html += '<div class="q-text">'+qNo+'. 你在音频里听到的这句商务话，中文意思是？</div>';
+      html += '<div class="quiz-opts" data-listen="1" data-answer="'+esc(s.cn)+'">';
+      opts.forEach((o, oi) => {
+        const letter = String.fromCharCode(65+oi);
+        html += '<div class="quiz-opt" data-correct="'+(o===s.cn)+'">'+letter+'. '+esc(o)+'</div>';
+      });
+      html += '</div>';
+      html += '<details style="margin-top:.4rem;"><summary>答案与原文</summary><div class="dialogue-body" style="margin-top:.3rem;"><b>听到：</b>'+esc(s.en)+'<br><b>正确：</b>'+esc(s.cn)+'</div></details>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  if (!qNo) html += '<div class="sent-item"><div class="sent-cn">本章暂无听力题。</div></div>';
   return html;
 }
+// Segment player: seek to start, play, auto-pause at end
+function playSeg(id){
+  const a = document.getElementById(id);
+  if (!a) return;
+  const start = parseFloat(a.dataset.start||"0");
+  const end = parseFloat(a.dataset.end||"60");
+  try {
+    a.currentTime = start;
+    a.play();
+    // clear old listeners
+    if (a._segTimer) clearInterval(a._segTimer);
+    a._segTimer = setInterval(() => {
+      if (a.currentTime >= end || a.paused){
+        if (!a.paused) a.pause();
+        clearInterval(a._segTimer);
+      }
+    }, 200);
+  } catch(e){ console.warn("seg play err", e); }
+}
+// auto-start boundary: when user presses native play button, seek to start first
+document.addEventListener('play', function(e){
+  const a = e.target;
+  if (a && a.dataset && a.dataset.start !== undefined && !a._boundaryBound){
+    a._boundaryBound = true;
+    const start = parseFloat(a.dataset.start||"0");
+    const end = parseFloat(a.dataset.end||"60");
+    if (a.currentTime < start || a.currentTime >= end) {
+      try { a.currentTime = start; } catch(e){}
+    }
+    if (a._segTimer) clearInterval(a._segTimer);
+    a._segTimer = setInterval(() => {
+      if (a.currentTime >= end || a.paused){
+        if (!a.paused) a.pause();
+        clearInterval(a._segTimer);
+      }
+    }, 200);
+  }
+}, true);
 function bindListeningQ(){
   document.querySelectorAll('.quiz-opts[data-listen] .quiz-opt').forEach(opt => {
     opt.onclick = () => {
@@ -1424,7 +1533,7 @@ function renderDay(){
   }
   html += "</div>";
 
-  // audio
+  // audio (two-segment: words 0:00-1:00, sentences 1:00-2:00)
   const audioId = t.chapter.id;
   const AUDIO_CDN = {
     "part1.chapter1":"https://aka.doubaocdn.com/s/ClCKNFevxD",
@@ -1449,10 +1558,17 @@ function renderDay(){
     "part3.chapter8":"https://aka.doubaocdn.com/s/vmB6jJHPLm"
   };
   const audioUrl = AUDIO_CDN[audioId] || ("audio/"+audioId+".mp3");
-  html += '<div class="sec-title">'+SVG.headphones+' 今日音频 <span class="sec-sub">'+audioId+'.mp3</span></div>';
-  html += '<div class="audio-wrap"><audio controls preload="none" src="'+audioUrl+'"></audio></div>';
+  html += '<div class="sec-title">'+SVG.headphones+' 分段听力 <span class="sec-sub">'+audioId+'.mp3</span></div>';
+  // Segment 1: words
+  html += '<div class="audio-wrap"><div style="font-size:.78rem;font-weight:600;color:var(--c-text);margin-bottom:.3rem;">① 单词朗读段（0:00–1:00）</div>'
+    + '<audio controls preload="none" id="seg1Audio" src="'+audioUrl+'" data-start="0" data-end="60"></audio>'
+    + '<button class="settings-btn" style="margin-top:.4rem;width:auto;padding:.3rem .8rem;font-size:.72rem;" onclick="playSeg(\'seg1Audio\')">▶ 重播本段</button></div>';
+  // Segment 2: sentences
+  html += '<div class="audio-wrap"><div style="font-size:.78rem;font-weight:600;color:var(--c-text);margin-bottom:.3rem;">② 例句朗读段（1:00–2:00）</div>'
+    + '<audio controls preload="none" id="seg2Audio" src="'+audioUrl+'" data-start="60" data-end="120"></audio>'
+    + '<button class="settings-btn" style="margin-top:.4rem;width:auto;padding:.3rem .8rem;font-size:.72rem;" onclick="playSeg(\'seg2Audio\')">▶ 重播本段</button></div>';
 
-  // listening mini question
+  // listening mini question (split: words Qs under seg1, sentence Qs under seg2)
   html += renderListeningQ(t.chapter);
 
   // words
